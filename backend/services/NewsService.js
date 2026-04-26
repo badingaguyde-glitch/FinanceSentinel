@@ -51,7 +51,15 @@ const getDatasetById = async (datasetId, options = {}) => {
     const { limit = 100, fields = [] } = options;
 
     const projection = {};
-    fields.forEach(f => projection[f] = 1);
+    if (fields.length > 0) {
+        fields.forEach(f => {
+            if (f) projection[f] = 1;
+        });
+        // Always include essential metadata for merging and display
+        projection["publishedAt"] = 1;
+        projection["title"] = 1;
+        projection["source"] = 1;
+    }
 
     return await News.find({})
         .select(projection)

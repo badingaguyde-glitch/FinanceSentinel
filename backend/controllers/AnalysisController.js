@@ -3,8 +3,8 @@ const statEngine = require("../services/statEngine");
 const NewsService = require("../services/NewsService");
 
 const llmClient = new OpenAI({
-  baseURL: "http://localhost:1234/v1",
-  apiKey: "lm-studio"
+    baseURL: "http://localhost:1234/v1",
+    apiKey: "lm-studio"
 });
 
 // =======================
@@ -31,7 +31,7 @@ FORMAT:
   },
   "external_ticker": "^GSPC",
   "target_variable": "price_data",
-  "feature_candidates": ["sentiment_scores"],
+  "feature_candidates": ["sentimentScore"],
   "mcp_tasks": ["statistics", "regression"]
 }
 `;
@@ -53,18 +53,18 @@ STRICT RULES:
 // =======================
 
 const TICKER_MAP = {
-  "oil": "CL=F", "crude": "CL=F", "pétrole": "CL=F", "petrol": "CL=F",
-  "bitcoin": "BTC-USD", "btc": "BTC-USD", "crypto": "BTC-USD",
-  "ethereum": "ETH-USD", "eth": "ETH-USD",
-  "gold": "GC=F", "or": "GC=F",
-  "apple": "AAPL", "aapl": "AAPL",
-  "tesla": "TSLA", "tsla": "TSLA",
-  "amazon": "AMZN", "google": "GOOGL", "microsoft": "MSFT",
-  "s&p": "^GSPC", "sp500": "^GSPC", "nasdaq": "^IXIC",
-  "dow jones": "^DJI", "dow": "^DJI",
-  "natural gas": "NG=F", "gaz naturel": "NG=F",
-  "silver": "SI=F", "argent": "SI=F",
-  "iran": "CL=F", "russia": "CL=F", "ukraine": "CL=F",
+    "oil": "CL=F", "crude": "CL=F", "pétrole": "CL=F", "petrol": "CL=F",
+    "bitcoin": "BTC-USD", "btc": "BTC-USD", "crypto": "BTC-USD",
+    "ethereum": "ETH-USD", "eth": "ETH-USD",
+    "gold": "GC=F", "or": "GC=F",
+    "apple": "AAPL", "aapl": "AAPL",
+    "tesla": "TSLA", "tsla": "TSLA",
+    "amazon": "AMZN", "google": "GOOGL", "microsoft": "MSFT",
+    "s&p": "^GSPC", "sp500": "^GSPC", "nasdaq": "^IXIC",
+    "dow jones": "^DJI", "dow": "^DJI",
+    "natural gas": "NG=F", "gaz naturel": "NG=F",
+    "silver": "SI=F", "argent": "SI=F",
+    "iran": "CL=F", "russia": "CL=F", "ukraine": "CL=F",
 };
 
 function buildFallbackPlan(question) {
@@ -81,10 +81,10 @@ function buildFallbackPlan(question) {
     return {
         intent: `Analyze relationship between financial news sentiment and ${ticker}`,
         analysis_type: "hybrid",
-        data_requirements: { dataset_fields_needed: [], filters: {}, aggregations: [] },
+        data_requirements: { dataset_fields_needed: ["sentimentScore"], filters: {}, aggregations: [] },
         external_ticker: ticker,
         target_variable: "price_data",
-        feature_candidates: ["sentiment_scores"],
+        feature_candidates: ["sentimentScore"],
         mcp_tasks: ["statistics", "regression"]
     };
 }
@@ -94,9 +94,9 @@ function buildFallbackExplanation(question, mcpResults) {
     const models = mcpResults?.models;
 
     let corr = null;
-    if (stats?.correlations?.pearson?.sentiment_scores) {
-        const vals = stats.correlations.pearson.sentiment_scores;
-        const priceKey = Object.keys(vals).find(k => k.includes("price") && k !== "sentiment_scores");
+    if (stats?.correlations?.pearson?.sentimentScore) {
+        const vals = stats.correlations.pearson.sentimentScore;
+        const priceKey = Object.keys(vals).find(k => k.includes("price") && k !== "sentimentScore");
         if (priceKey) corr = vals[priceKey];
     }
 
@@ -139,14 +139,6 @@ function stripThinkBlocks(text) {
     return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 }
 
-const withTimeout = (promise, ms) => {
-    return Promise.race([
-        promise,
-        new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms)
-        )
-    ]);
-};
 
 // =======================
 // MAIN CONTROLLER
@@ -167,18 +159,15 @@ const analyzeData = async (req, res) => {
         let usedFallbackPlanner = false;
 
         try {
-            const plannerRes = await withTimeout(
-                llmClient.chat.completions.create({
-                    model: "deepseek/deepseek-r1-0528-qwen3-8b",
-                    messages: [
-                        { role: "system", content: PLANNER_PROMPT },
-                        { role: "user", content: `Query: ${question}` }
-                    ],
-                    temperature: 0.1,
-                    max_tokens: 300  // Cap to prevent 5-minute think blocks
-                }),
-                12000  // 12s timeout — if model is slow, use fallback
-            );
+            const plannerRes = await llmClient.chat.completions.create({
+                model: "deepseek/deepseek-r1-0528-qwen3-8b",
+                messages: [
+                    { role: "system", content: PLANNER_PROMPT },
+                    { role: "user", content: `Query: ${question}` }
+                ],
+                temperature: 0.1,
+                max_tokens: 400
+            });
 
             let raw = plannerRes.choices[0].message.content;
             raw = stripThinkBlocks(raw);  // Strip <think> from reasoning models
@@ -218,7 +207,7 @@ const analyzeData = async (req, res) => {
         // =======================
         const mcpConfig = {
             target_column: plan.target_variable || "price_data",
-            features: plan.feature_candidates?.length ? plan.feature_candidates : ["sentiment_scores"],
+            features: plan.feature_candidates?.length ? plan.feature_candidates : ["sentimentScore"],
             tasks: plan.mcp_tasks?.length ? plan.mcp_tasks : ["statistics", "regression"],
             external_ticker: plan.external_ticker || "^GSPC",
             filters: plan.data_requirements?.filters || {},
@@ -228,10 +217,7 @@ const analyzeData = async (req, res) => {
         // =======================
         // 4. MCP EXECUTION
         // =======================
-        const mcpResults = await withTimeout(
-            statEngine.runStatisticalAnalysis(dataset, mcpConfig),
-            50000  // 50s for Python + yfinance download
-        );
+        const mcpResults = await statEngine.runStatisticalAnalysis(dataset, mcpConfig);
 
         // =======================
         // 5. INTERPRETER LLM (with fallback)
@@ -239,18 +225,15 @@ const analyzeData = async (req, res) => {
         let explanation = "";
 
         try {
-            const interpreterRes = await withTimeout(
-                llmClient.chat.completions.create({
-                    model: "deepseek/deepseek-r1-0528-qwen3-8b",
-                    messages: [
-                        { role: "system", content: INTERPRETER_PROMPT },
-                        { role: "user", content: `User's Question: "${question}"\n\nData:\n${JSON.stringify(mcpResults).substring(0, 3000)}` }
-                    ],
-                    temperature: 0.3,
-                    max_tokens: 400
-                }),
-                20000  // 20s for interpretation
-            );
+            const interpreterRes = await llmClient.chat.completions.create({
+                model: "deepseek/deepseek-r1-0528-qwen3-8b",
+                messages: [
+                    { role: "system", content: INTERPRETER_PROMPT },
+                    { role: "user", content: `User's Question: "${question}"\n\nData:\n${JSON.stringify(mcpResults).substring(0, 3000)}` }
+                ],
+                temperature: 0.3,
+                max_tokens: 500
+            });
             explanation = stripThinkBlocks(interpreterRes.choices[0].message.content);
             if (!explanation) throw new Error("Empty response after stripping think blocks");
         } catch (interpErr) {

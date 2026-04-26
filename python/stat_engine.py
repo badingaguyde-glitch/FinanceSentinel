@@ -80,10 +80,24 @@ class DataProcessor:
 
     def process(self):
         self._sanitize_columns()
+        self._normalize_sentiment_names()
         self._detect_types()
         self._handle_missing()
         self._detect_outliers()
         return self.df
+
+    def _normalize_sentiment_names(self):
+        """Standardize various sentiment field names to 'sentimentScore' for internal consistency."""
+        mapping = {
+            "sentiment_scores": "sentimentScore",
+            "sentiment_score": "sentimentScore",
+            "sentiment": "sentimentScore",
+            "score": "sentimentScore"
+        }
+        for old_col, new_col in mapping.items():
+            if old_col in self.df.columns and new_col not in self.df.columns:
+                self.df.rename(columns={old_col: new_col}, inplace=True)
+                logger.info(f"Normalized column '{old_col}' to '{new_col}'")
 
     def _detect_types(self):
         for col in self.df.columns:
@@ -142,7 +156,21 @@ class Modeler:
             return {}
 
         if features:
-            X = self.df[features]
+            # Robust mapping: if requested features are missing, try to find normalized versions
+            final_features = []
+            for f in features:
+                if f in self.df.columns:
+                    final_features.append(f)
+                elif f == "sentiment_scores" and "sentimentScore" in self.df.columns:
+                    final_features.append("sentimentScore")
+                elif f == "sentimentScore" and "sentiment_scores" in self.df.columns:
+                    final_features.append("sentiment_scores")
+            
+            if not final_features:
+                 logger.warning(f"None of the requested features {features} found. Using all numeric columns.")
+                 X = self.df.select_dtypes(include=np.number).drop(columns=[target], errors="ignore")
+            else:
+                 X = self.df[final_features]
         else:
             X = self.df.drop(columns=[target], errors="ignore")
 
